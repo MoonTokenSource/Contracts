@@ -562,7 +562,7 @@ contract XYZMoon is Context, IERC20, Ownable {
     address[] private _excluded;
 
     uint256 private constant MAX = ~uint256(0);
-    uint256 private _tTotal = 10000000000 * 10**6 * 10**9;
+    uint256 private _tTotal = 6500000000000  * 10**9;
     uint256 private _rTotal = (MAX - (MAX % _tTotal));
     uint256 private _tFeeTotal;
 
@@ -573,8 +573,8 @@ contract XYZMoon is Context, IERC20, Ownable {
 
     address public treasuryAddress;
 
-    string private _name = "XYZMoon";
-    string private _symbol = "XYZMoon";
+    string private _name = "Save the Moon";
+    string private _symbol = "MOON";
     uint8 private _decimals = 9;
 
     uint256 public lunaFee = 8;
@@ -595,7 +595,7 @@ contract XYZMoon is Context, IERC20, Ownable {
     bool inSwapAndLiquify;
     bool public swapAndLiquifyEnabled = true;
 
-    uint256 private numTokensSellToBurnLuna = 500000 * 10**6 * 10**9;
+    uint256 private numTokensSellToBurnLuna = 500000 * 10**9;
 
     event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
     event SwapAndLiquifyEnabledUpdated(bool enabled);
