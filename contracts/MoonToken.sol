@@ -785,7 +785,8 @@ contract XYZMoon is Context, IERC20, Ownable {
     function _transferBothExcluded(
         address sender,
         address recipient,
-        uint256 tAmount
+        uint256 tAmount,
+        bool isSell
     ) private {
         (
             uint256 rAmount,
@@ -800,9 +801,13 @@ contract XYZMoon is Context, IERC20, Ownable {
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _tOwned[recipient] = _tOwned[recipient].add(tTransferAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        _takeLunaFee(tLunaFee);
         _takeTreasuryFee(tTreasuryFee);
         _reflectFee(rFee, tFee);
+        if(isSell){
+            _takeBurnFee(tLunaFee);
+        }else{
+            _takeLunaFee(tLunaFee);
+        }
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -945,6 +950,14 @@ contract XYZMoon is Context, IERC20, Ownable {
             _tOwned[address(this)] = _tOwned[address(this)].add(tLunaFee);
     }
 
+     function _takeBurnFee(uint256 tBurn) private {
+        uint256 currentRate = _getRate();
+        uint256 rBurn = tBurn.mul(currentRate);
+        _rOwned[0x000000000000000000000000000000000000dEaD] = _rOwned[0x000000000000000000000000000000000000dEaD].add(rBurn);
+        if (_isExcluded[0x000000000000000000000000000000000000dEaD])
+            _tOwned[0x000000000000000000000000000000000000dEaD] = _tOwned[0x000000000000000000000000000000000000dEaD].add(tBurn);
+    }
+
     function _takeTreasuryFee(uint256 tTreasury) private {
         uint256 currentRate = _getRate();
         uint256 rTreasury = tTreasury.mul(currentRate);
@@ -1030,7 +1043,7 @@ contract XYZMoon is Context, IERC20, Ownable {
             takeFee = false;
         }
 
-        _tokenTransfer(from, to, amount, takeFee);
+        _tokenTransfer(from, to, amount, takeFee, ammPairs[to]);
     }
 
     function swapAndLiquify(uint256 contractTokenBalance) private lockTheSwap {
@@ -1064,20 +1077,21 @@ contract XYZMoon is Context, IERC20, Ownable {
         address sender,
         address recipient,
         uint256 amount,
-        bool takeFee
+        bool takeFee,
+        bool isSell
     ) private {
         if (!takeFee) removeAllFee();
 
         if (_isExcluded[sender] && !_isExcluded[recipient]) {
-            _transferFromExcluded(sender, recipient, amount);
+            _transferFromExcluded(sender, recipient, amount,isSell);
         } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
-            _transferToExcluded(sender, recipient, amount);
+            _transferToExcluded(sender, recipient, amount,isSell);
         } else if (!_isExcluded[sender] && !_isExcluded[recipient]) {
-            _transferStandard(sender, recipient, amount);
+            _transferStandard(sender, recipient, amount,isSell);
         } else if (_isExcluded[sender] && _isExcluded[recipient]) {
-            _transferBothExcluded(sender, recipient, amount);
+            _transferBothExcluded(sender, recipient, amount,isSell);
         } else {
-            _transferStandard(sender, recipient, amount);
+            _transferStandard(sender, recipient, amount,isSell);
         }
 
         if (!takeFee) restoreAllFee();
@@ -1086,7 +1100,9 @@ contract XYZMoon is Context, IERC20, Ownable {
     function _transferStandard(
         address sender,
         address recipient,
-        uint256 tAmount
+        uint256 tAmount,
+        bool isSell
+
     ) private {
         (
             uint256 rAmount,
@@ -1100,7 +1116,12 @@ contract XYZMoon is Context, IERC20, Ownable {
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
         _takeTreasuryFee(tTreasuryFee);
-        _takeLunaFee(tLunaFee);
+
+        if(isSell){
+            _takeBurnFee(tLunaFee);
+        }else{
+            _takeLunaFee(tLunaFee);
+        }
 
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
@@ -1109,7 +1130,9 @@ contract XYZMoon is Context, IERC20, Ownable {
     function _transferToExcluded(
         address sender,
         address recipient,
-        uint256 tAmount
+        uint256 tAmount,
+        bool isSell
+
     ) private {
         (
             uint256 rAmount,
@@ -1124,7 +1147,12 @@ contract XYZMoon is Context, IERC20, Ownable {
         _tOwned[recipient] = _tOwned[recipient].add(tTransferAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
         _takeTreasuryFee(tTreasuryFee);
-        _takeLunaFee(tLunaFee);
+
+        if(isSell){
+            _takeBurnFee(tLunaFee);
+        }else{
+            _takeLunaFee(tLunaFee);
+        }
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
     }
@@ -1132,7 +1160,9 @@ contract XYZMoon is Context, IERC20, Ownable {
     function _transferFromExcluded(
         address sender,
         address recipient,
-        uint256 tAmount
+        uint256 tAmount,
+        bool isSell
+
     ) private {
         (
             uint256 rAmount,
@@ -1147,7 +1177,12 @@ contract XYZMoon is Context, IERC20, Ownable {
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
         _takeTreasuryFee(tTreasuryFee);
-        _takeLunaFee(tLunaFee);
+
+        if(isSell){
+            _takeBurnFee(tLunaFee);
+        }else{
+            _takeLunaFee(tLunaFee);
+        }
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
     }
