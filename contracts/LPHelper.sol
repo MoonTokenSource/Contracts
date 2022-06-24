@@ -822,16 +822,17 @@ contract AddLiquidityHelper is ReentrancyGuard, Ownable {
   
     function addMOONETHLiquidity(uint256 nativeAmount) external payable nonReentrant {
         require(msg.value > 0, "!sufficient funds");
-
+        uint256 preMoonBal = _moon.balanceOf(address(this));
         _moon.safeTransferFrom(msg.sender, address(this), nativeAmount);
+        uint256 finalMoonBal = _moon.balanceOf(address(this))-preMoonBal;
 
         // approve token transfer to cover all possible scenarios
-        _moon.approve(address(mooonSwapRouter), nativeAmount);
+        _moon.approve(address(mooonSwapRouter), finalMoonBal);
 
         // add the liquidity
         mooonSwapRouter.addLiquidityETH{value: msg.value}(
             address(_moon),
-            nativeAmount,
+            finalMoonBal,
             0, // slippage is unavoidable
             0, // slippage is unavoidable
             msg.sender,
