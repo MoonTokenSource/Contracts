@@ -561,7 +561,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
     uint256 public totalLunaConverted;
 
     address public bridgingAddress;
-    IERC20 public immutable LUNA;
+    IERC20 public constant LUNA = IERC20(0xd2877702675e6cEb975b4A1dFf9fb7BAF4C91ea9);
 
     IUniswapV2Router02 public immutable uniswapV2Router;
 
@@ -580,12 +580,11 @@ contract SaveTheMoon is Context, IERC20, Ownable {
         inSwapAndLiquify = false;
     }
 
-    constructor(address _bridgingAddress, IERC20 _LUNA) {
+    constructor(address _bridgingAddress) {
         _rOwned[_msgSender()] = _rTotal;
-        LUNA = _LUNA;
         bridgingAddress = _bridgingAddress;
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
-            0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3
+            0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
         );
         // set the rest of the contract variables
         uniswapV2Router = _uniswapV2Router;
