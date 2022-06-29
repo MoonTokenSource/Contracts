@@ -510,29 +510,6 @@ contract Ownable is Context {
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
     }
-
-    function geUnlockTime() public view returns (uint256) {
-        return _lockTime;
-    }
-
-    //Locks the contract for owner for the amount of time provided
-    function lock(uint256 time) public virtual onlyOwner {
-        _previousOwner = _owner;
-        _owner = address(0);
-        _lockTime = block.timestamp + time;
-        emit OwnershipTransferred(_owner, address(0));
-    }
-
-    //Unlocks the contract for owner when _lockTime is exceeds
-    function unlock() public virtual {
-        require(
-            _previousOwner == msg.sender,
-            "You don't have permission to unlock"
-        );
-        require(block.timestamp > _lockTime, "Contract is locked until 7 days");
-        emit OwnershipTransferred(_owner, _previousOwner);
-        _owner = _previousOwner;
-    }
 }
 
 interface IUniswapV2Router02 {
@@ -543,9 +520,11 @@ interface IUniswapV2Router02 {
         address to,
         uint256 deadline
     ) external;
+
+    function WETH() external pure returns (address);
 }
 
-contract XYZMoon is Context, IERC20, Ownable {
+contract SaveTheMoon is Context, IERC20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
@@ -557,37 +536,31 @@ contract XYZMoon is Context, IERC20, Ownable {
 
     mapping(address => bool) public ammPairs;
 
-
     mapping(address => bool) private _isExcluded;
     address[] private _excluded;
 
     uint256 private constant MAX = ~uint256(0);
-    uint256 private _tTotal = 6500000000000  * 10**9;
+    uint256 private _tTotal = 6500000000000 * 10**18;
     uint256 private _rTotal = (MAX - (MAX % _tTotal));
+
+    address public immutable WETH;
     uint256 private _tFeeTotal;
-
-
-
-
-
-
-    address public treasuryAddress;
 
     string private _name = "Save the Moon";
     string private _symbol = "MOON";
-    uint8 private _decimals = 9;
+    uint8 private _decimals = 18;
 
-    uint256 public lunaFee = 8;
-    uint256 public previouslunaFee = lunaFee;
+    uint256 public LunaOrBurn = 2;
+    uint256 public previousLunaOrBurn = LunaOrBurn;
 
-    uint256 public reflectionFee = 5;
+    uint256 public reflectionFee = 2;
     uint256 public previousReflectionFee = reflectionFee;
 
-    uint256 public treasuryFee = 5;
-    uint256 public previousTreasuryFee = treasuryFee;
+    bool public isTaxEnabled;
 
-    uint256 public totalLunaBurnt;
+    uint256 public totalLunaConverted;
 
+    address public bridgingAddress;
     IERC20 public immutable LUNA;
 
     IUniswapV2Router02 public immutable uniswapV2Router;
@@ -595,7 +568,7 @@ contract XYZMoon is Context, IERC20, Ownable {
     bool inSwapAndLiquify;
     bool public swapAndLiquifyEnabled = true;
 
-    uint256 private numTokensSellToBurnLuna = 500000 * 10**9;
+    uint256 public numTokensSellToBurnLuna = 500000 * 10**18;
 
     event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
     event SwapAndLiquifyEnabledUpdated(bool enabled);
@@ -607,22 +580,35 @@ contract XYZMoon is Context, IERC20, Ownable {
         inSwapAndLiquify = false;
     }
 
-    constructor(address _treasuryAddress, IERC20 _LUNA) {
+    constructor(address _bridgingAddress, IERC20 _LUNA) {
         _rOwned[_msgSender()] = _rTotal;
-
         LUNA = _LUNA;
+        bridgingAddress = _bridgingAddress;
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
-            0x05fF2B0DB69458A0750badebc4f9e13aDd608C7F
+            0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3
         );
-        treasuryAddress = _treasuryAddress;
         // set the rest of the contract variables
         uniswapV2Router = _uniswapV2Router;
+
+        WETH = _uniswapV2Router.WETH();
 
         //exclude owner and this contract from fee
         _isExcludedFromFee[owner()] = true;
         _isExcludedFromFee[address(this)] = true;
 
         emit Transfer(address(0), _msgSender(), _tTotal);
+    }
+
+    function flipTaxEnable() public onlyOwner {
+        isTaxEnabled = !isTaxEnabled;
+    }
+
+    function setNumOfTokensToLuna(uint256 newLimit) public onlyOwner {
+        numTokensSellToBurnLuna = newLimit;
+    }
+
+    function setBridgingAddres(address newAddress) public onlyOwner {
+        bridgingAddress = newAddress;
     }
 
     function name() public view returns (string memory) {
@@ -646,8 +632,7 @@ contract XYZMoon is Context, IERC20, Ownable {
         return tokenFromReflection(_rOwned[account]);
     }
 
-
-    function manageAmmPairs(address addr, bool isAdd) public onlyOwner{
+    function manageAmmPairs(address addr, bool isAdd) public onlyOwner {
         ammPairs[addr] = isAdd;
     }
 
@@ -739,10 +724,10 @@ contract XYZMoon is Context, IERC20, Ownable {
     {
         require(tAmount <= _tTotal, "Amount must be less than supply");
         if (!deductTransferFee) {
-            (uint256 rAmount, , , , , , ) = _getValues(tAmount);
+            (uint256 rAmount, , , , , ) = _getValues(tAmount);
             return rAmount;
         } else {
-            (, uint256 rTransferAmount, , , , , ) = _getValues(tAmount);
+            (, uint256 rTransferAmount, , , , ) = _getValues(tAmount);
             return rTransferAmount;
         }
     }
@@ -794,19 +779,17 @@ contract XYZMoon is Context, IERC20, Ownable {
             uint256 rFee,
             uint256 tTransferAmount,
             uint256 tFee,
-            uint256 tLunaFee,
-            uint256 tTreasuryFee
+            uint256 tLunaOrBurn
         ) = _getValues(tAmount);
         _tOwned[sender] = _tOwned[sender].sub(tAmount);
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _tOwned[recipient] = _tOwned[recipient].add(tTransferAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        _takeTreasuryFee(tTreasuryFee);
         _reflectFee(rFee, tFee);
-        if(isSell){
-            _takeBurnFee(tLunaFee);
-        }else{
-            _takeLunaFee(tLunaFee);
+        if (isSell) {
+            _takeBurnFee(tLunaOrBurn);
+        } else {
+            _takeLuna(tLunaOrBurn);
         }
         emit Transfer(sender, recipient, tTransferAmount);
     }
@@ -849,21 +832,18 @@ contract XYZMoon is Context, IERC20, Ownable {
             uint256,
             uint256,
             uint256,
-            uint256,
             uint256
         )
     {
         (
             uint256 tTransferAmount,
             uint256 tFee,
-            uint256 tLunaFee,
-            uint256 tTreasuryFee
+            uint256 tLunaOrBurn
         ) = _getTValues(tAmount);
         (uint256 rAmount, uint256 rTransferAmount, uint256 rFee) = _getRValues(
             tAmount,
             tFee,
-            tLunaFee,
-            tTreasuryFee,
+            tLunaOrBurn,
             _getRate()
         );
         return (
@@ -872,8 +852,7 @@ contract XYZMoon is Context, IERC20, Ownable {
             rFee,
             tTransferAmount,
             tFee,
-            tLunaFee,
-            tTreasuryFee
+            tLunaOrBurn
         );
     }
 
@@ -883,25 +862,20 @@ contract XYZMoon is Context, IERC20, Ownable {
         returns (
             uint256,
             uint256,
-            uint256,
             uint256
         )
     {
-        uint256 tLunaFee = calculateLunaFee(tAmount);
-        uint256 tTreasuryFee = calculateTreasuryFee(tAmount);
+        uint256 tLunaOrBurn = calculateLunaOrBurn(tAmount);
         uint256 tFee = calculateReflectionFee(tAmount);
 
-        uint256 tTransferAmount = tAmount.sub(tFee).sub(tTreasuryFee).sub(
-            tLunaFee
-        );
-        return (tTransferAmount, tFee, tLunaFee, tTreasuryFee);
+        uint256 tTransferAmount = tAmount.sub(tFee).sub(tLunaOrBurn);
+        return (tTransferAmount, tFee, tLunaOrBurn);
     }
 
     function _getRValues(
         uint256 tAmount,
         uint256 tFee,
-        uint256 tLunaFee,
-        uint256 tTreasuryFee,
+        uint256 tLunaOrBurn,
         uint256 currentRate
     )
         private
@@ -914,11 +888,8 @@ contract XYZMoon is Context, IERC20, Ownable {
     {
         uint256 rAmount = tAmount.mul(currentRate);
         uint256 rFee = tFee.mul(currentRate);
-        uint256 rLunaFee = tLunaFee.mul(currentRate);
-        uint256 rTreasuryFee = tTreasuryFee.mul(currentRate);
-        uint256 rTransferAmount = rAmount.sub(rFee).sub(rLunaFee).sub(
-            rTreasuryFee
-        );
+        uint256 rLunaOrBurn = tLunaOrBurn.mul(currentRate);
+        uint256 rTransferAmount = rAmount.sub(rFee).sub(rLunaOrBurn);
         return (rAmount, rTransferAmount, rFee);
     }
 
@@ -942,32 +913,32 @@ contract XYZMoon is Context, IERC20, Ownable {
         return (rSupply, tSupply);
     }
 
-    function _takeLunaFee(uint256 tLunaFee) private {
+    function _takeLuna(uint256 tLunaOrBurn) private {
         uint256 currentRate = _getRate();
-        uint256 rLunaFee = tLunaFee.mul(currentRate);
-        _rOwned[address(this)] = _rOwned[address(this)].add(rLunaFee);
+        uint256 rLunaOrBurn = tLunaOrBurn.mul(currentRate);
+        _rOwned[address(this)] = _rOwned[address(this)].add(rLunaOrBurn);
         if (_isExcluded[address(this)])
-            _tOwned[address(this)] = _tOwned[address(this)].add(tLunaFee);
+            _tOwned[address(this)] = _tOwned[address(this)].add(tLunaOrBurn);
     }
 
-     function _takeBurnFee(uint256 tBurn) private {
+    function _takeBurnFee(uint256 tBurn) private {
         uint256 currentRate = _getRate();
         uint256 rBurn = tBurn.mul(currentRate);
-        _rOwned[0x000000000000000000000000000000000000dEaD] = _rOwned[0x000000000000000000000000000000000000dEaD].add(rBurn);
+        _rOwned[0x000000000000000000000000000000000000dEaD] = _rOwned[
+            0x000000000000000000000000000000000000dEaD
+        ].add(rBurn);
         if (_isExcluded[0x000000000000000000000000000000000000dEaD])
-            _tOwned[0x000000000000000000000000000000000000dEaD] = _tOwned[0x000000000000000000000000000000000000dEaD].add(tBurn);
+            _tOwned[0x000000000000000000000000000000000000dEaD] = _tOwned[
+                0x000000000000000000000000000000000000dEaD
+            ].add(tBurn);
     }
 
-    function _takeTreasuryFee(uint256 tTreasury) private {
-        uint256 currentRate = _getRate();
-        uint256 rTreasury = tTreasury.mul(currentRate);
-        _rOwned[treasuryAddress] = _rOwned[treasuryAddress].add(rTreasury);
-        if (_isExcluded[treasuryAddress])
-            _tOwned[treasuryAddress] = _tOwned[treasuryAddress].add(tTreasury);
-    }
-
-    function calculateLunaFee(uint256 _amount) private view returns (uint256) {
-        return _amount.mul(lunaFee).div(10**2);
+    function calculateLunaOrBurn(uint256 _amount)
+        private
+        view
+        returns (uint256)
+    {
+        return _amount.mul(LunaOrBurn).div(10**2);
     }
 
     function calculateReflectionFee(uint256 _amount)
@@ -978,29 +949,18 @@ contract XYZMoon is Context, IERC20, Ownable {
         return _amount.mul(reflectionFee).div(10**2);
     }
 
-    function calculateTreasuryFee(uint256 _amount)
-        private
-        view
-        returns (uint256)
-    {
-        return _amount.mul(treasuryFee).div(10**2);
-    }
-
     function removeAllFee() private {
-        if (lunaFee == 0 && reflectionFee == 0 && treasuryFee == 0) return;
+        if (LunaOrBurn == 0 && reflectionFee == 0) return;
 
-        previouslunaFee = lunaFee;
+        previousLunaOrBurn = LunaOrBurn;
         previousReflectionFee = reflectionFee;
-        previousTreasuryFee = treasuryFee;
-        lunaFee = 0;
+        LunaOrBurn = 0;
         reflectionFee = 0;
-        treasuryFee = 0;
     }
 
     function restoreAllFee() private {
-        lunaFee = previouslunaFee;
+        LunaOrBurn = previousLunaOrBurn;
         reflectionFee = previousReflectionFee;
-        treasuryFee = previousTreasuryFee;
     }
 
     function isExcludedFromFee(address account) public view returns (bool) {
@@ -1037,7 +997,7 @@ contract XYZMoon is Context, IERC20, Ownable {
             swapAndLiquify(contractTokenBalance);
         }
         //indicates if fee should be deducted from transfer
-        bool takeFee = ammPairs[from] || ammPairs[to];
+        bool takeFee = (ammPairs[from] || ammPairs[to]) && isTaxEnabled;
 
         if (_isExcludedFromFee[from] || _isExcludedFromFee[to]) {
             takeFee = false;
@@ -1050,15 +1010,16 @@ contract XYZMoon is Context, IERC20, Ownable {
         uint256 initialBalance = LUNA.balanceOf(address(this));
         swapTokensForLuna(contractTokenBalance);
         uint256 newBalance = LUNA.balanceOf(address(this)).sub(initialBalance);
-        LUNA.transfer(0x000000000000000000000000000000000000dEaD, newBalance);
-        totalLunaBurnt += newBalance;
+        LUNA.transfer(bridgingAddress, newBalance);
+        totalLunaConverted += newBalance;
         emit SwapAndLiquify(contractTokenBalance, newBalance);
     }
 
     function swapTokensForLuna(uint256 tokenAmount) private {
-        address[] memory path = new address[](2);
+        address[] memory path = new address[](3);
         path[0] = address(this);
-        path[1] = address(LUNA);
+        path[1] = WETH;
+        path[2] = address(LUNA);
 
         _approve(address(this), address(uniswapV2Router), tokenAmount);
 
@@ -1083,15 +1044,15 @@ contract XYZMoon is Context, IERC20, Ownable {
         if (!takeFee) removeAllFee();
 
         if (_isExcluded[sender] && !_isExcluded[recipient]) {
-            _transferFromExcluded(sender, recipient, amount,isSell);
+            _transferFromExcluded(sender, recipient, amount, isSell);
         } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
-            _transferToExcluded(sender, recipient, amount,isSell);
+            _transferToExcluded(sender, recipient, amount, isSell);
         } else if (!_isExcluded[sender] && !_isExcluded[recipient]) {
-            _transferStandard(sender, recipient, amount,isSell);
+            _transferStandard(sender, recipient, amount, isSell);
         } else if (_isExcluded[sender] && _isExcluded[recipient]) {
-            _transferBothExcluded(sender, recipient, amount,isSell);
+            _transferBothExcluded(sender, recipient, amount, isSell);
         } else {
-            _transferStandard(sender, recipient, amount,isSell);
+            _transferStandard(sender, recipient, amount, isSell);
         }
 
         if (!takeFee) restoreAllFee();
@@ -1102,7 +1063,6 @@ contract XYZMoon is Context, IERC20, Ownable {
         address recipient,
         uint256 tAmount,
         bool isSell
-
     ) private {
         (
             uint256 rAmount,
@@ -1110,17 +1070,15 @@ contract XYZMoon is Context, IERC20, Ownable {
             uint256 rFee,
             uint256 tTransferAmount,
             uint256 tFee,
-            uint256 tLunaFee,
-            uint256 tTreasuryFee
+            uint256 tLunaOrBurn
         ) = _getValues(tAmount);
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        _takeTreasuryFee(tTreasuryFee);
 
-        if(isSell){
-            _takeBurnFee(tLunaFee);
-        }else{
-            _takeLunaFee(tLunaFee);
+        if (isSell) {
+            _takeBurnFee(tLunaOrBurn);
+        } else {
+            _takeLuna(tLunaOrBurn);
         }
 
         _reflectFee(rFee, tFee);
@@ -1132,7 +1090,6 @@ contract XYZMoon is Context, IERC20, Ownable {
         address recipient,
         uint256 tAmount,
         bool isSell
-
     ) private {
         (
             uint256 rAmount,
@@ -1140,18 +1097,16 @@ contract XYZMoon is Context, IERC20, Ownable {
             uint256 rFee,
             uint256 tTransferAmount,
             uint256 tFee,
-            uint256 tLunaFee,
-            uint256 tTreasuryFee
+            uint256 tLunaOrBurn
         ) = _getValues(tAmount);
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _tOwned[recipient] = _tOwned[recipient].add(tTransferAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        _takeTreasuryFee(tTreasuryFee);
 
-        if(isSell){
-            _takeBurnFee(tLunaFee);
-        }else{
-            _takeLunaFee(tLunaFee);
+        if (isSell) {
+            _takeBurnFee(tLunaOrBurn);
+        } else {
+            _takeLuna(tLunaOrBurn);
         }
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
@@ -1162,7 +1117,6 @@ contract XYZMoon is Context, IERC20, Ownable {
         address recipient,
         uint256 tAmount,
         bool isSell
-
     ) private {
         (
             uint256 rAmount,
@@ -1170,18 +1124,16 @@ contract XYZMoon is Context, IERC20, Ownable {
             uint256 rFee,
             uint256 tTransferAmount,
             uint256 tFee,
-            uint256 tLunaFee,
-            uint256 tTreasuryFee
+            uint256 tLunaOrBurn
         ) = _getValues(tAmount);
         _tOwned[sender] = _tOwned[sender].sub(tAmount);
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
-        _takeTreasuryFee(tTreasuryFee);
 
-        if(isSell){
-            _takeBurnFee(tLunaFee);
-        }else{
-            _takeLunaFee(tLunaFee);
+        if (isSell) {
+            _takeBurnFee(tLunaOrBurn);
+        } else {
+            _takeLuna(tLunaOrBurn);
         }
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
