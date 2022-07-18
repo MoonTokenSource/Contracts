@@ -546,8 +546,8 @@ contract SaveTheMoon is Context, IERC20, Ownable {
     address public immutable WETH;
     uint256 private _tFeeTotal;
 
-    string private _name = "Save the Moon";
-    string private _symbol = "MOON";
+    string private _name = "Savethemoon.io";
+    string private _symbol = "MOONS";
     uint8 private _decimals = 18;
 
     uint256 public LunaOrBurn = 2;
