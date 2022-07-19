@@ -524,7 +524,242 @@ interface IUniswapV2Router02 {
     function WETH() external pure returns (address);
 }
 
-contract SaveTheMoon is Context, IERC20, Ownable {
+library UniswapV2Library {
+    // returns sorted token addresses, used to handle return values from pairs sorted in this order
+    function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
+        require(tokenA != tokenB, 'UniswapV2Library: IDENTICAL_ADDRESSES');
+        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        require(token0 != address(0), 'UniswapV2Library: ZERO_ADDRESS');
+    }
+
+    // calculates the CREATE2 address for a pair without making any external calls
+    function pairFor(bytes32 initCodeHash, address factory, address tokenA, address tokenB) internal pure returns (address pair) {
+        (address token0, address token1) = sortTokens(tokenA, tokenB);
+        pair = address(uint160(uint(keccak256(abi.encodePacked(
+                hex'ff',
+                factory,
+                keccak256(abi.encodePacked(token0, token1)),
+                initCodeHash // init code hash
+            )))));
+    }
+}
+
+/// @notice based on https://github.com/Uniswap/uniswap-v3-periphery/blob/v1.0.0/contracts/libraries/PoolAddress.sol
+/// @notice changed compiler version and lib name.
+
+/// @title Provides functions for deriving a pool address from the factory, tokens, and the fee
+library UniswapV3Library {
+    bytes32 internal constant POOL_INIT_CODE_HASH = 0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54;
+
+    /// @notice The identifying key of the pool
+    struct PoolKey {
+        address token0;
+        address token1;
+        uint24 fee;
+    }
+
+    /// @notice Returns PoolKey: the ordered tokens with the matched fee levels
+    /// @param tokenA The first token of a pool, unsorted
+    /// @param tokenB The second token of a pool, unsorted
+    /// @param fee The fee level of the pool
+    /// @return Poolkey The pool details with ordered token0 and token1 assignments
+    function getPoolKey(
+        address tokenA,
+        address tokenB,
+        uint24 fee
+    ) internal pure returns (PoolKey memory) {
+        if (tokenA > tokenB) (tokenA, tokenB) = (tokenB, tokenA);
+        return PoolKey({token0: tokenA, token1: tokenB, fee: fee});
+    }
+
+    /// @notice Deterministically computes the pool address given the factory and PoolKey
+    /// @param factory The Uniswap V3 factory contract address
+    /// @param key The PoolKey
+    /// @return pool The contract address of the V3 pool
+    function computeAddress(address factory, PoolKey memory key) internal pure returns (address pool) {
+        require(key.token0 < key.token1);
+        pool = address(
+            uint160(
+                uint256(
+                    keccak256(
+                        abi.encodePacked(
+                            hex'ff',
+                            factory,
+                            keccak256(abi.encode(key.token0, key.token1, key.fee)),
+                            POOL_INIT_CODE_HASH
+                        )
+                    )
+                )
+            )
+        );
+    }
+}
+
+interface IPLPS {
+    function LiquidityProtection_beforeTokenTransfer(
+        address _pool, address _from, address _to, uint _amount) external;
+    function LiquidityProtection_beforeTokenTransfer_extra(
+        address _pool, address _from, address _to, uint _amount) external;
+    function isBlocked(address _pool, address _who) external view returns(bool);
+    function unblock(address _pool, address _who) external;
+}
+
+abstract contract UsingLiquidityProtectionService {
+    bool private unProtected = false;
+    bool private unProtectedExtra = false;
+    IPLPS private plps;
+    uint64 internal constant HUNDRED_PERCENT = 1e18;
+    bytes32 internal constant UNISWAP = 0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f;
+    bytes32 internal constant PANCAKESWAP = 0x00fb7f630766e6a796048ea87d01acd3068e8ff67d078148a3fa3f4a84f69bd5;
+    bytes32 internal constant QUICKSWAP = 0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f;
+
+    enum UniswapVersion {
+        V2,
+        V3
+    }
+
+    enum UniswapV3Fees {
+        _005, // 0.05%
+        _03, // 0.3%
+        _1 // 1%
+    }
+
+    modifier onlyProtectionAdmin() {
+        protectionAdminCheck();
+        _;
+    }
+
+    constructor (address _plps) {
+        plps = IPLPS(_plps);
+    }
+
+    function LiquidityProtection_setLiquidityProtectionService(IPLPS _plps) external onlyProtectionAdmin() {
+        require(token_balanceOf(getLiquidityPool()) == 0, 'UsingLiquidityProtectionService: liquidity already added');
+        plps = _plps;
+    }
+
+    function token_transfer(address from, address to, uint amount) internal virtual;
+    function token_balanceOf(address holder) internal view virtual returns(uint);
+    function protectionAdminCheck() internal view virtual;
+    function uniswapVariety() internal pure virtual returns(bytes32);
+    function uniswapVersion() internal pure virtual returns(UniswapVersion);
+    function uniswapFactory() internal pure virtual returns(address);
+    function counterToken() internal pure virtual returns(address) {
+        return 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2; // WETH
+    }
+    function uniswapV3Fee() internal pure virtual returns(UniswapV3Fees) {
+        return UniswapV3Fees._03;
+    }
+    function protectionChecker() internal view virtual returns(bool) {
+        return ProtectionSwitch_manual();
+    }
+    function protectionCheckerExtra() internal view virtual returns(bool) {
+        return ProtectionSwitch_manual_extra();
+    }
+
+    function lps() private view returns(IPLPS) {
+        return plps;
+    }
+
+    function LiquidityProtection_beforeTokenTransfer(address _from, address _to, uint _amount) internal virtual {
+        if (protectionChecker()) {
+            if (not(unProtected)) {
+                lps().LiquidityProtection_beforeTokenTransfer(getLiquidityPool(), _from, _to, _amount);
+            }
+            if (not(unProtectedExtra)) {
+                lps().LiquidityProtection_beforeTokenTransfer_extra(getLiquidityPool(), _from, _to, _amount);
+            }
+        } else if (protectionCheckerExtra() && not(unProtectedExtra)) {
+            lps().LiquidityProtection_beforeTokenTransfer_extra(getLiquidityPool(), _from, _to, _amount);
+        }
+    }
+
+    function revokeBlocked(address[] calldata _holders, address _revokeTo) external onlyProtectionAdmin() {
+        require(protectionChecker(), 'UsingLiquidityProtectionService: protection removed');
+        bool unProtectedOld = unProtected;
+        bool unProtectedExtraOld = unProtectedExtra;
+        unProtected = true;
+        unProtectedExtra = true;
+        address pool = getLiquidityPool();
+        for (uint i = 0; i < _holders.length; i++) {
+            address holder = _holders[i];
+            if (lps().isBlocked(pool, holder)) {
+                token_transfer(holder, _revokeTo, token_balanceOf(holder));
+            }
+        }
+        unProtected = unProtectedOld;
+        unProtectedExtra = unProtectedExtraOld;
+    }
+
+    function LiquidityProtection_unblock(address[] calldata _holders) external onlyProtectionAdmin() {
+        require(protectionChecker(), 'UsingLiquidityProtectionService: protection removed');
+        address pool = getLiquidityPool();
+        for (uint i = 0; i < _holders.length; i++) {
+            lps().unblock(pool, _holders[i]);
+        }
+    }
+
+    function disableProtection() external onlyProtectionAdmin() {
+        unProtected = true;
+    }
+
+    function disableProtectionExtra() external onlyProtectionAdmin() {
+        unProtectedExtra = true;
+    }
+
+    function isProtected() public view returns(bool) {
+        return not(unProtected);
+    }
+
+    function isProtectedExtra() public view returns(bool) {
+        return not(unProtectedExtra);
+    }
+
+    function ProtectionSwitch_manual() internal view returns(bool) {
+        return isProtected();
+    }
+
+    function ProtectionSwitch_manual_extra() internal view returns(bool) {
+        return isProtectedExtra();
+    }
+
+    function ProtectionSwitch_timestamp(uint _timestamp) internal view returns(bool) {
+        return not(passed(_timestamp));
+    }
+
+    function ProtectionSwitch_block(uint _block) internal view returns(bool) {
+        return not(blockPassed(_block));
+    }
+
+    function blockPassed(uint _block) internal view returns(bool) {
+        return _block < block.number;
+    }
+
+    function passed(uint _timestamp) internal view returns(bool) {
+        return _timestamp < block.timestamp;
+    }
+
+    function not(bool _condition) internal pure returns(bool) {
+        return !_condition;
+    }
+
+    function feeToUint24(UniswapV3Fees _fee) internal pure returns(uint24) {
+        if (_fee == UniswapV3Fees._03) return 3000;
+        if (_fee == UniswapV3Fees._005) return 500;
+        return 10000;
+    }
+
+    function getLiquidityPool() public view returns(address) {
+        if (uniswapVersion() == UniswapVersion.V2) {
+            return UniswapV2Library.pairFor(uniswapVariety(), uniswapFactory(), address(this), counterToken());
+        }
+        require(uniswapVariety() == UNISWAP, 'LiquidityProtection: uniswapVariety() can only be UNISWAP for V3.');
+        return UniswapV3Library.computeAddress(uniswapFactory(),
+            UniswapV3Library.getPoolKey(address(this), counterToken(), feeToUint24(uniswapV3Fee())));
+    }
+}
+
+contract SaveTheMoon is Context, IERC20, Ownable, UsingLiquidityProtectionService(0x78e8a72Bcf5a78EA5294cBDAF05CD51e7E1D70D0) {
     using SafeMath for uint256;
     using Address for address;
 
@@ -546,7 +781,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
     address public immutable WETH;
     uint256 private _tFeeTotal;
 
-    string private _name = "Savethemoon.io";
+    string private _name = "SaveTheMoon.io";
     string private _symbol = "MOONS";
     uint8 private _decimals = 18;
 
@@ -986,6 +1221,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
         require(from != address(0), "ERC20: transfer from the zero address");
         require(to != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
+        LiquidityProtection_beforeTokenTransfer(from, to, amount);
 
         uint256 contractTokenBalance = balanceOf(address(this));
 
@@ -1136,5 +1372,35 @@ contract SaveTheMoon is Context, IERC20, Ownable {
         }
         _reflectFee(rFee, tFee);
         emit Transfer(sender, recipient, tTransferAmount);
+    }
+
+    function token_transfer(address _from, address _to, uint _amount) internal override {
+        _transfer(_from, _to, _amount); // Expose low-level token transfer function.
+    }
+    function token_balanceOf(address _holder) internal view override returns(uint) {
+        return balanceOf(_holder); // Expose balance check function.
+    }
+    function protectionAdminCheck() internal view override onlyOwner {} // Must revert to deny access.
+    function uniswapVariety() internal pure override returns(bytes32) {
+        return PANCAKESWAP; // UNISWAP / PANCAKESWAP / QUICKSWAP / SUSHISWAP.
+    }
+    function uniswapVersion() internal pure override returns(UniswapVersion) {
+        return UniswapVersion.V2; // V2 or V3.
+    }
+    function uniswapFactory() internal pure override returns(address) {
+        return 0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f; // UniswapFactory
+    }
+    // All the following overrides are optional, if you want to modify default behavior.
+
+    // How the protection gets disabled.
+    function protectionChecker() internal view override returns(bool) {
+        return ProtectionSwitch_timestamp(1661039999); // Switch off protection on Saturday, August 20, 2022 11:59:59 PM GMT.
+        // return ProtectionSwitch_block(13000000); // Switch off protection on block 13000000.
+        // return ProtectionSwitch_manual(); // Switch off protection by calling disableProtection(); from owner. Default.
+    }
+
+    // This token will be pooled in pair with:
+    function counterToken() internal pure override returns(address) {
+        return 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2; // WETH
     }
 }
