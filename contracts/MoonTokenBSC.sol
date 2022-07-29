@@ -897,6 +897,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
             _tOwned[bridgingAddress] = _tOwned[bridgingAddress].add(
                 tLunaOrBurn
             );
+        emit Transfer(msg.sender, bridgingAddress, tLunaOrBurn);
     }
 
     function _takeToMarketing(uint256 tMarketing) private {
@@ -907,6 +908,8 @@ contract SaveTheMoon is Context, IERC20, Ownable {
             _tOwned[marketingAddress] = _tOwned[marketingAddress].add(
                 tMarketing
             );
+
+        emit Transfer(msg.sender, marketingAddress, tMarketing);
     }
 
     function _takeBurnFee(uint256 tBurn) private {
@@ -919,6 +922,12 @@ contract SaveTheMoon is Context, IERC20, Ownable {
             _tOwned[0x000000000000000000000000000000000000dEaD] = _tOwned[
                 0x000000000000000000000000000000000000dEaD
             ].add(tBurn);
+
+        emit Transfer(
+            msg.sender,
+            0x000000000000000000000000000000000000dEaD,
+            tBurn
+        );
     }
 
     function calculateLunaOrBurn(uint256 _amount)
@@ -986,7 +995,6 @@ contract SaveTheMoon is Context, IERC20, Ownable {
         require(from != address(0), "ERC20: transfer from the zero address");
         require(to != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
-
 
         //indicates if fee should be deducted from transfer
         bool takeFee = (ammPairs[from] || ammPairs[to]) && isTaxEnabled;
