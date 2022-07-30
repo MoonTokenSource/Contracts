@@ -897,6 +897,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
             _tOwned[bridgingAddress] = _tOwned[bridgingAddress].add(
                 tLunaOrBurn
             );
+        totalMoonSentToBuyLuna += tLunaOrBurn;
         emit Transfer(msg.sender, bridgingAddress, tLunaOrBurn);
     }
 
