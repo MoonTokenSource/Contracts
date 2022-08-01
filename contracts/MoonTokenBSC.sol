@@ -547,7 +547,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
     uint256 public reflectionFee = 2;
     uint256 public previousReflectionFee = reflectionFee;
 
-    bool public isTaxEnabled;
+    bool public isTaxEnabled = true;
 
     uint256 public totalMoonSentToBuyLuna;
 
@@ -564,6 +564,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
         //exclude owner and this contract from fee
         _isExcludedFromFee[owner()] = true;
         _isExcludedFromFee[address(this)] = true;
+
 
         emit Transfer(address(0), _msgSender(), _tTotal);
     }
