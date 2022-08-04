@@ -512,7 +512,7 @@ contract Ownable is Context {
     }
 }
 
-contract SaveTheMoon is Context, IERC20, Ownable {
+contract SaveTheMoonBSC is Context, IERC20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
@@ -564,6 +564,7 @@ contract SaveTheMoon is Context, IERC20, Ownable {
         //exclude owner and this contract from fee
         _isExcludedFromFee[owner()] = true;
         _isExcludedFromFee[address(this)] = true;
+        
 
 
         emit Transfer(address(0), _msgSender(), _tTotal);

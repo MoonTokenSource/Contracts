@@ -1,5 +1,5 @@
-const SaveTheMoon = artifacts.require("SaveTheMoon");
-const MoonPresale = artifacts.require("MoonPresale");
+const SaveTheMoonBSC = artifacts.require("SaveTheMoonBSC");
+const MoonMigrate = artifacts.require("MoonMigrator");
 const Web3 = require("web3")
 
 const buyLimit = Web3.utils.toWei("200")
@@ -9,19 +9,18 @@ module.exports = async function (deployer) {
 
   console.log({buyLimit,price})
 
-  // await deployer.deploy(
-  //   SaveTheMoon,
-  //   "0x22b856cb8e6F074173C238Be35174A122be095bb",
-  // );
+  
+  await deployer.deploy(SaveTheMoonBSC,
+    "0x4d1A12d63379df869ad98bB39A5F226660ac6C88",
+    "0x4d1A12d63379df869ad98bB39A5F226660ac6C88")
 
 
 
   await deployer.deploy(
-    MoonPresale,
-    "0xff5e42a80B505E0B1131E788f968ECe4b78A27BA",
-    buyLimit,
-    price
+    MoonMigrate,
+    SaveTheMoonBSC.address
   );
+
 
 
 };
